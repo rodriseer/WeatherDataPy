@@ -1,0 +1,205 @@
+# Neccessary imports for project functionality
+import requests
+import pandas as pd
+from PIL import Image
+import matplotlib.pyplot as plt
+from io import BytesIO
+import matplotlib.gridspec as gridspec
+from datetime import datetime, timedelta
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+api_key = os.getenv('OPENWEATHER_API_KEY')
+print(f"Loaded API Key: {api_key}")
+
+# Function to fetch current weather data for a given city
+def get_todays_weather(api_key, city_name):
+    base_url = "https://api.openweathermap.org/data/2.5/weather"
+    complete_url = base_url + "?q=" + city_name + "&appid=" + api_key + "&units=metric"
+    response = requests.get(complete_url)
+
+    if response.status_code == 200:
+        weather_data = response.json()
+        temperature = weather_data['main']['temp']
+        weather_description = weather_data['weather'][0]['description']
+
+        icon_code = weather_data['weather'][0]['icon']
+        icon_url = f"http://openweathermap.org/img/wn/{icon_code}.png"
+        return temperature, weather_description, icon_url
+    else:
+        print("Error: ", response.status_code)
+        return None, None, None
+
+# Function to display the current weather data using matplotlib
+def display_weather_data(city_name, temperature_c, weather_description, icon_url):
+    temperature_f = (temperature_c * 9/5) + 32
+
+    plt.figure(figsize=(5, 5))
+    gs = gridspec.GridSpec(1, 2, width_ratios=[1, 4])
+    ax_icon = plt.subplot(gs[0])
+    ax_temp = plt.subplot(gs[1])
+
+    ax_icon.set_facecolor('black')
+    ax_temp.set_facecolor('white')
+    plt.gcf().patch.set_facecolor('wheat')
+
+    response = requests.get(icon_url)
+    image = Image.open(BytesIO(response.content))
+    icon_size = plt.gcf().dpi * plt.gcf().get_size_inches()[0] / 5
+    image = image.resize((int(icon_size), int(icon_size)))
+    ax_icon.imshow(image)
+    ax_icon.axis('off')
+
+    temperatures = [temperature_c, temperature_f]
+    temp_labels = [f"{round(temperature_c)} °C", f"{round(temperature_f)} °F"]
+    bars = ax_temp.bar(['Celsius', 'Fahrenheit'], temperatures, color=['darkorange', 'darkred'])
+
+    ax_temp.set_title(f"Current Temperature in {city_name}", color='black', fontsize=12)
+    for bar, label in zip(bars, temp_labels):
+        yval = bar.get_height()
+        ax_temp.text(bar.get_x() + bar.get_width()/2, yval, label, ha='center', va='bottom', color='black', fontsize=10)
+
+    textstr = f"Current temperature in {city_name}:\n{round(temperature_c)}°C or {round(temperature_f)}°F\nWeather: {weather_description}"
+
+    font_size = 10
+    props = dict(boxstyle='round', facecolor='white', alpha=0.5, pad=1)
+    box_x_position = 0.5
+    box_y_position = -0.15
+    ax_temp.text(box_x_position, box_y_position, textstr,
+          transform=ax_temp.transAxes, fontsize=font_size,
+          verticalalignment='top', horizontalalignment='center', bbox=props)
+
+    ax_temp.tick_params(colors='black', which='both')
+    plt.tight_layout(pad=0.4)
+    plt.show()
+
+# Function to get the geographical coordinates (latitude, longitude) for a given city
+def get_coordinates(city_name, api_key):
+    geocode_url = f"http://api.openweathermap.org/geo/1.0/direct?q={city_name}&limit=1&appid={api_key}"
+    response = requests.get(geocode_url)
+    if response.status_code == 200:
+        data = response.json()
+        if data:
+            return data[0]['lat'], data[0]['lon']
+    return None, None
+
+# Function to fetch a 5-day weather forecast for a given city
+def get_5day_forecast(lat, lon, api_key):
+    forecast_url = f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units=metric"
+    response = requests.get(forecast_url)
+    if response.status_code == 200:
+        return response.json()['list']
+    else:
+        print(f"Error fetching forecast: {response.status_code} - {response.text}")
+        return []
+
+# Function to display the 5-day weather forecast using matplotlib
+def display_5day_forecast_data(forecast_data, city_name):
+    forecast_list = [{
+        'Date': datetime.fromisoformat(item['dt_txt']).strftime('%Y-%m-%d %H:%M'),
+        'Temperature (°C)': item['main']['temp'],
+        'Temp (°F)': item['main']['temp'] * 9/5 + 32,
+        'Weather': item['weather'][0]['description'],
+    } for item in forecast_data]
+
+    forecast_df = pd.DataFrame(forecast_list)
+    forecast_df.set_index('Date', inplace=True)
+
+    print("\n\nThis is the 5 day forecast for ", city_name)
+    ax = forecast_df.plot(y=['Temperature (°C)', 'Temp (°F)'], kind='line')
+    plt.title(f'5-Day Weather Forecast with Celsius and Fahrenheit for {city_name}')
+    plt.ylabel('Temperature (°C)')
+    plt.xlabel('Date and Time')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+# Function to compare and display the weather data for two cities side by side
+def display_weather_comparison(city1, temp1, weather_desc1, icon_url1, city2, temp2, weather_desc2, icon_url2):
+    temp_f1 = (temp1 * 9/5) + 32
+    temp_f2 = (temp2 * 9/5) + 32
+
+    plt.figure(figsize=(10, 5))
+    gs = gridspec.GridSpec(1, 4, width_ratios=[1, 4, 1, 4])
+
+    ax_icon1 = plt.subplot(gs[0])
+    ax_temp1 = plt.subplot(gs[1])
+
+    ax_icon2 = plt.subplot(gs[2])
+    ax_temp2 = plt.subplot(gs[3])
+
+    display_city_weather(ax_icon1, ax_temp1, city1, temp1, temp_f1, weather_desc1, icon_url1)
+    display_city_weather(ax_icon2, ax_temp2, city2, temp2, temp_f2, weather_desc2, icon_url2)
+
+    plt.tight_layout()
+    plt.show()
+
+# Helper function to display weather data for a single city (used in comparison)
+def display_city_weather(ax_icon, ax_temp, city, temp_c, temp_f, weather_desc, icon_url):
+    ax_icon.set_facecolor('black')
+    ax_temp.set_facecolor('white')
+    plt.gcf().patch.set_facecolor('wheat')
+
+    response = requests.get(icon_url)
+    image = Image.open(BytesIO(response.content))
+    icon_size = plt.gcf().dpi * plt.gcf().get_size_inches()[1] / 5
+    image = image.resize((int(icon_size), int(icon_size)))
+    ax_icon.imshow(image)
+    ax_icon.axis('off')
+
+    temperatures = [temp_c, temp_f]
+    temp_labels = [f"{round(temp_c)} °C", f"{round(temp_f)} °F"]
+    bars = ax_temp.bar(['Celsius', 'Fahrenheit'], temperatures, color=['darkorange', 'darkred'])
+
+    ax_temp.set_title(f"Current Temperature in {city}", color='black', fontsize=12)
+    for bar, label in zip(bars, temp_labels):
+      yval = bar.get_height()
+      ax_temp.text(bar.get_x() + bar.get_width()/2, yval, label, ha='center', va='bottom', color='black', fontsize=10)
+
+    textstr = f"Current temperature in {city}:\n{round(temp_c)}°C or {round(temp_f)}°F\nWeather: {weather_desc}"
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5, pad=1)
+    ax_temp.text(0.5, -0.15, textstr,
+       transform=ax_temp.transAxes, fontsize=10,
+       verticalalignment='top', horizontalalignment='center', bbox=props)
+
+
+# Main loop to handle user interaction and flow
+while True:
+    city_name = input("\nEnter city name for our daily forecast and for 5-day forecast (or 'exit' to quit): ").capitalize()
+    if city_name.lower() == 'exit':
+        break
+
+    lat, lon = get_coordinates(city_name, api_key)
+    if lat is None or lon is None:
+        print(f"Could not get coordinates for {city_name}")
+        continue
+
+    temp, weather_desc, icon_url = get_todays_weather(api_key, city_name)
+    if temp is not None:
+        print(f"Current temperature in {city_name}: {round(temp)}°C or {round(temp * 9/5) + 32}°F")
+        print(f"Weather: {weather_desc}")
+        display_weather_data(city_name, temp, weather_desc, icon_url)
+    else:
+        print(f"Error getting weather data for {city_name}")
+        continue
+
+    forecast_data = get_5day_forecast(lat, lon, api_key)
+    if forecast_data:
+        display_5day_forecast_data(forecast_data, city_name)
+    else:
+        print(f"Could not get 5-day forecast for {city_name}")
+
+    compare = input("\nDo you want to compare the daily temperature with another location? (yes/no): ").strip().lower()
+    if compare == 'yes':
+        city_name2 = input("\nEnter second city name: ").capitalize()
+        temp2, weather_desc2, icon_url2 = get_todays_weather(api_key, city_name2)
+        if temp2 is not None:
+            display_weather_comparison(city_name, temp, weather_desc, icon_url, city_name2, temp2, weather_desc2, icon_url2)
+        else:
+            print(f"Error getting weather data for {city_name2}")
+    else:
+        exit_prompt = input("\nExit the program? (yes/no): ").strip().lower()
+        if exit_prompt == 'yes':
+            break
